@@ -1,3 +1,9 @@
+from __future__ import annotations
+
+import copy
+from typing import Self
+
+
 import pickle
 import typing
 import mne
@@ -12,6 +18,7 @@ class Folders:
     """
     def __init__(
             self,
+            end_folder: str,
             raw_data: str,
             preprocessed_data: str,
             save_data: str,
@@ -19,6 +26,7 @@ class Folders:
             mhw_objects: str,
             images: str
     ):
+        self.end_folder = end_folder
         self.raw_data = raw_data
         self.preprocessed_data = preprocessed_data
         self.save_data = save_data
@@ -40,17 +48,43 @@ class MicrostateHelperWrapper:
         self.sampling_rate = raw.info['sfreq']
         self.ms = None
         self.splitted_ms = None
-        self.dynamic_statistics = None
+        self.split_dynamic_statistics = None
 
-    def load(self):
-        print("Loading MHW object")
-        with open(self.folders.save_data + self.folders.mhw_objects + self.raw_filename + '.pkl', 'rb') as file:
+    def load(self) -> Self:
+        print("Loading MHW object", self.raw_filename)
+        with open(
+                self.folders.save_data +
+                self.folders.mhw_objects +
+                self.folders.end_folder +
+                self.raw_filename + '.pkl',
+                'rb'
+        ) as file:
             return pickle.load(file)
 
-    def save(self):
-        print("Saving MHW object")
-        with open(self.folders.save_data + self.folders.mhw_objects + self.raw_filename + '.pkl', 'wb') as file:
+    def save(self) -> Self:
+        print("Saving MHW object", self.raw_filename)
+        with open(
+                self.folders.save_data +
+                self.folders.mhw_objects +
+                self.folders.end_folder +
+                self.raw_filename + '.pkl',
+                'wb'
+        ) as file:
             pickle.dump(self, file)
+        return self
+
+    def check_saved(self) -> bool:
+        try:
+            with open(
+                    self.folders.save_data +
+                    self.folders.mhw_objects +
+                    self.folders.end_folder +
+                    self.raw_filename + '.pkl',
+                    'rb'
+            ) as file:
+                return True
+        except FileNotFoundError:
+            return False
 
     def split_ms_sequence(
             self,
@@ -89,7 +123,7 @@ class MicrostateHelperWrapper:
             self,
             inplace=False,
             threshold=0.02,
-    ):
+    ) -> Self:
         """
         Applies the basic switch threshold algorithm to the microstates sequence.
         Removes "noisy" microstates that are shorter than the threshold.
@@ -208,7 +242,9 @@ class MicrostateHelperWrapper:
             self.ms = ms_clone
             return self
         else:
-            return ms_clone
+            full_copy = copy.deepcopy(self)
+            full_copy.ms = ms_clone
+            return full_copy
 
     def get_event_bounds_by_event_transitions(
             self,
@@ -285,8 +321,9 @@ class MicrostateHelperWrapper:
             key_names,
             key_namings,
             transitions,
-            time_threshold
-    ):
+            time_threshold=20,
+            recalc=False
+    ) -> Self:
         """
         Splits the microstates sequence by the events in the raw data annotation. Sets in the splitted_ms attribute.
 
@@ -299,8 +336,14 @@ class MicrostateHelperWrapper:
         :param key_namings: annotation names mapped to event meaning
         :param transitions: event transitions to look for in format [[from_event_name, [to_event_names]]]
         :param time_threshold: minimum duration of the event in seconds
+        :param recalc: if True, will recalculate the split
         :return: self
         """
+
+        if self.splitted_ms is not None and not recalc:
+            print('Already calculated microstates split')
+            return self
+        print('Calculating microstates split...')
 
         timestamps, events, event_names = self.get_event_bounds_by_event_transitions(
             key_names,
@@ -323,13 +366,14 @@ class MicrostateHelperWrapper:
     def calc_raw_ms(
             self,
             recalc=False
-    ):
+    ) -> Self:
         """
         Calculates the microstates of the raw data. Sets the ms attribute. If recalc is False, will return the current
         :param recalc: if True, will recalculate the microstates
         :return: self
         """
         if self.ms is not None and not recalc:
+            print('Already calculated microstates')
             return self
 
         print('Calculating microstates...')
@@ -344,32 +388,14 @@ class MicrostateHelperWrapper:
 
         return self
 
-    def calc_event_split(
+    def split_dynamic_calc_statistics(
             self,
-            recalc=False,
-            key_names=None,
-            key_namings=None,
-            transitions=None,
-            time_threshold=20
-    ):
-        """
-        Calculates the microstates split by the events in the raw data annotations. Sets the splitted_ms attribute.
-        If recalc is False, will return the current
+            recalc=False
+    ) -> Self:
 
-        :param recalc: If True, will recalculate the split
-        :param key_names: annotation names of the events to look for
-        :param key_namings: annotation names mapped to event meaning
-        :param transitions: event transitions to look for in format [[from_event_name, [to_event_names]]]
-        :param time_threshold: minimum duration of the event in seconds
-        :return: self
-        """
-        if self.splitted_ms is not None and not recalc:
+        if self.split_dynamic_statistics is not None and not recalc:
+            print('Already calculated dynamic statistics')
             return self
-        print('Calculating microstates split...')
-        self.splitted_ms = self.split_ms_sequence_by_events(key_names, key_namings, transitions, time_threshold)
-        return self
-
-    def dynamic_calculate_statistics_for_split(self):
 
         ms_sequences, events, event_names, timestamps = self.splitted_ms
         dynamic = pd.DataFrame()
@@ -385,19 +411,25 @@ class MicrostateHelperWrapper:
             dynamic = pd.concat([dynamic, ms_dynamic])
 
         print("Calculated dynamic statistics")
-        self.dynamic_statistics = dynamic
+        self.split_dynamic_statistics = dynamic
         return self
 
-    def dynamic_save_statistics(self):
-        self.dynamic_statistics.to_csv(
-            self.folders.save_data + self.folders.statistics + self.raw_filename + '_dynamic_stats.csv'
+    def split_dynamic_save_statistics(self) -> Self:
+        self.split_dynamic_statistics.to_csv(
+            self.folders.save_data +
+            self.folders.statistics +
+            self.folders.end_folder +
+            self.raw_filename + '_split_dynamic_stats.csv'
         )
         print("Saved dynamic statistics")
         return self
 
-    def dynamic_drop_self_to_self(self):
+    def split_dynamic_drop_self_to_self(self) -> Self:
         for i in range(4):
             # print(f'Microstate_{i}_to_{i}')
-            self.dynamic_statistics.drop(f'Microstate_{i}_to_{i}', axis=1, inplace=True)
+            if f'Microstate_{i}_to_{i}' in self.split_dynamic_statistics.columns:
+                self.split_dynamic_statistics.drop(f'Microstate_{i}_to_{i}', axis=1, inplace=True)
+            else:
+                print(f'Microstate_{i}_to_{i} not found or already dropped')
         print("Dropped self-to-self transitions")
         return self
