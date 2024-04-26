@@ -49,6 +49,7 @@ class MicrostateHelperWrapper:
         self.ms = None
         self.splitted_ms = None
         self.split_dynamic_statistics = None
+        self.split_static_statistics = None
 
     def load(self) -> Self:
         print("Loading MHW object", self.raw_filename)
@@ -411,6 +412,7 @@ class MicrostateHelperWrapper:
             dynamic = pd.concat([dynamic, ms_dynamic])
 
         print("Calculated dynamic statistics")
+        dynamic.reset_index(drop=True, inplace=True)
         self.split_dynamic_statistics = dynamic
         return self
 
@@ -432,4 +434,43 @@ class MicrostateHelperWrapper:
             else:
                 print(f'Microstate_{i}_to_{i} not found or already dropped')
         print("Dropped self-to-self transitions")
+        return self
+
+    def split_static_calc_statistics(
+            self,
+            recalc=False
+    ) -> Self:
+
+        try:
+            if self.split_static_statistics is not None and not recalc:
+                print('Already calculated static statistics')
+                return self
+        except AttributeError:
+            self.split_static_statistics = None
+
+        ms_sequences, events, event_names, timestamps = self.splitted_ms
+        static = pd.DataFrame()
+
+        for i in range(len(ms_sequences)):
+            print("Event: ", event_names[events[i]])
+            duration = (timestamps[i][1] - timestamps[i][0])
+            # nk.microstates_plot(ms_sequences[i], epoch = (0, duration))
+            ms_static = nk.microstates_static(ms_sequences[i], sampling_rate=self.sampling_rate, show=False)
+            ms_static['Event'] = event_names[events[i]]
+            ms_static['Order'] = i
+            static = pd.concat([static, ms_static])
+
+        print("Calculated static statistics")
+        static.reset_index(drop=True, inplace=True)
+        self.split_static_statistics = static
+        return self
+
+    def split_static_save_statistics(self) -> Self:
+        self.split_static_statistics.to_csv(
+            self.folders.save_data +
+            self.folders.statistics +
+            self.folders.end_folder +
+            self.raw_filename + '_split_static_stats.csv'
+        )
+        print("Saved static statistics")
         return self
