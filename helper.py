@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import copy
+import os
 from typing import Self
 
 
@@ -64,13 +65,10 @@ class MicrostateHelperWrapper:
 
     def save(self) -> Self:
         print("Saving MHW object", self.raw_filename)
-        with open(
-                self.folders.save_data +
-                self.folders.mhw_objects +
-                self.folders.end_folder +
-                self.raw_filename + '.pkl',
-                'wb'
-        ) as file:
+        folder = self.folders.save_data + self.folders.mhw_objects + self.folders.end_folder
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        with open(folder + self.raw_filename + '.pkl', 'wb') as file:
             pickle.dump(self, file)
         return self
 
@@ -417,12 +415,10 @@ class MicrostateHelperWrapper:
         return self
 
     def split_dynamic_save_statistics(self) -> Self:
-        self.split_dynamic_statistics.to_csv(
-            self.folders.save_data +
-            self.folders.statistics +
-            self.folders.end_folder +
-            self.raw_filename + '_split_dynamic_stats.csv'
-        )
+        folder = self.folders.save_data + self.folders.statistics + self.folders.end_folder
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        self.split_dynamic_statistics.to_csv(folder + self.raw_filename + '_split_dynamic_stats.csv', index=False)
         print("Saved dynamic statistics")
         return self
 
@@ -466,11 +462,9 @@ class MicrostateHelperWrapper:
         return self
 
     def split_static_save_statistics(self) -> Self:
-        self.split_static_statistics.to_csv(
-            self.folders.save_data +
-            self.folders.statistics +
-            self.folders.end_folder +
-            self.raw_filename + '_split_static_stats.csv'
-        )
+        folder = self.folders.save_data + self.folders.statistics + self.folders.end_folder
+        if not os.path.exists(folder):
+            os.makedirs(folder)
+        self.split_static_statistics.to_csv(folder + self.raw_filename + '_split_static_stats.csv', index=False, index_label=False)
         print("Saved static statistics")
         return self
