@@ -4,12 +4,12 @@ import copy
 import os
 from typing import Self
 
-
 import pickle
 import typing
 import mne
 import neurokit2 as nk
 import pandas as pd
+import scipy
 
 
 class Folders:
@@ -17,6 +17,7 @@ class Folders:
     Class for storing the paths to the folders for the data.
     ALL FOLDERS SHOULD END WITH A SLASH
     """
+
     def __init__(
             self,
             end_folder: str,
@@ -51,6 +52,7 @@ class MicrostateHelperWrapper:
         self.splitted_ms = None
         self.split_dynamic_statistics = None
         self.split_static_statistics = None
+        self.normative_labels = None
 
     def load(self) -> Self:
         print("Loading MHW object", self.raw_filename)
@@ -465,6 +467,68 @@ class MicrostateHelperWrapper:
         folder = self.folders.save_data + self.folders.statistics + self.folders.end_folder
         if not os.path.exists(folder):
             os.makedirs(folder)
-        self.split_static_statistics.to_csv(folder + self.raw_filename + '_split_static_stats.csv', index=False, index_label=False)
+        self.split_static_statistics.to_csv(folder + self.raw_filename + '_split_static_stats.csv', index=False,
+                                            index_label=False)
         print("Saved static statistics")
         return self
+
+    def calc_normative_labels(
+            self,
+            normative_maps,
+    ) -> Self:
+        """
+        Calculates the normative labels for the microstates sequence.
+        :param normative_maps: normative maps to use
+        :return: self
+
+        TODO: need add inverted variation - 8!
+        """
+        print("Calculating normative labels...")
+        try:
+            if self.normative_labels is None:
+                print("Normative labels not set, calculating...")
+            else:
+                print("Normative labels already set")
+                return self
+        except AttributeError:
+            self.normative_labels = None
+
+        remap_df = pd.DataFrame(columns=["Distance_A", "Distance_B", "Distance_C", "Distance_D", "label"])
+        labels = {
+            0: "A",
+            1: "B",
+            2: "C",
+            3: "D"
+        }
+        unique_regroup_variants = {}
+        for i in range(4):
+            for j in range(4):
+                if i == j:
+                    continue
+                for k in range(4):
+                    if i == k or j == k:
+                        continue
+                    for l in range(4):
+                        if i == l or j == l or k == l:
+                            continue
+                        unique_regroup_variants[i, j, k, l] = 0
+
+        distances = scipy.spatial.distance.cdist(self.ms["Microstates"], normative_maps.T, 'correlation')
+
+        for variant in unique_regroup_variants:
+            for i in range(4):
+                unique_regroup_variants[variant] += distances[i, variant[i]]
+
+        minimal = min(unique_regroup_variants, key=unique_regroup_variants.get)
+
+        for i in range(4):
+            remap_df = pd.concat([
+                remap_df,
+                pd.DataFrame(
+                    [[distances[i, 0], distances[i, 1], distances[i, 2], distances[i, 3], labels[minimal[i]]]],
+                    columns=["Distance_A", "Distance_B", "Distance_C", "Distance_D", "label"],
+                    index=[i]
+                )
+            ])
+
+        return remap_df
