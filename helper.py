@@ -8,6 +8,7 @@ import pickle
 import typing
 import mne
 import neurokit2 as nk
+import numpy as np
 import pandas as pd
 import scipy
 
@@ -493,42 +494,79 @@ class MicrostateHelperWrapper:
         except AttributeError:
             self.normative_labels = None
 
-        remap_df = pd.DataFrame(columns=["Distance_A", "Distance_B", "Distance_C", "Distance_D", "label"])
+        def calc_regroup_variants(available: [int], max_len=4, current_len=0):
+            # print(current_len, max_len)
+            if len(available) == 1:
+                return available
+            variants = []
+            current_len += 1
+            if current_len == max_len:
+                return available
+            for num in available:
+                available_copy = available.copy()
+                available_copy.remove(num)
+                if num < max_len and num + max_len in available_copy:
+                    available_copy.remove(num + max_len)
+                elif num >= max_len and num - max_len in available_copy:
+                    available_copy.remove(num - max_len)
+                # print(available_copy)
+                for variant in calc_regroup_variants(available_copy, max_len=max_len, current_len=current_len):
+                    if isinstance(variant, int):
+                        variants.append([num, variant])
+                    else:
+                        variants.append([num, *variant])
+            return variants
+
+        remap_df_inv = pd.DataFrame(columns=["Distance_A", "Distance_B", "Distance_C", "Distance_D", "label", "inv"])
         labels = {
             0: "A",
             1: "B",
             2: "C",
             3: "D"
         }
-        unique_regroup_variants = {}
-        for i in range(4):
-            for j in range(4):
-                if i == j:
-                    continue
-                for k in range(4):
-                    if i == k or j == k:
-                        continue
-                    for l in range(4):
-                        if i == l or j == l or k == l:
-                            continue
-                        unique_regroup_variants[i, j, k, l] = 0
-
-        distances = scipy.spatial.distance.cdist(self.ms["Microstates"], normative_maps.T, 'correlation')
-
-        for variant in unique_regroup_variants:
+        # unique_regroup_variants = {}
+        inverted_clusters_user = self.ms["Microstates"] * -1
+        clusters_user_and_inv = np.append(self.ms["Microstates"], inverted_clusters_user, axis=0)
+        # print(clusters_user_and_inv.shape)
+        distances = scipy.spatial.distance.cdist(clusters_user_and_inv, normative_maps.T)
+        # distances
+        min_combination = []
+        min_distance = np.inf
+        min_nums = []
+        for variant in (calc_regroup_variants([0, 1, 2, 3, 4, 5, 6, 7], max_len=4)):
+            # print(variant)
+            dist = 0
+            # print(distances)
             for i in range(4):
-                unique_regroup_variants[variant] += distances[i, variant[i]]
+                # print(distances.T[i, variant[i]])
+                dist += distances.T[i, variant[i]]
+            # print(distances.take(variant).sum())
+            # dist = distances.take(variant).sum()
+            if dist < min_distance:
+                min_distance = dist
+                min_combination = variant
+                min_nums = [distances.T[i, variant[i]] for i in range(4)]
+        print("##########")
+        print(min_combination)
+        print(min_nums)
+        print(min_distance)
+        print(distances)
 
-        minimal = min(unique_regroup_variants, key=unique_regroup_variants.get)
-
-        for i in range(4):
-            remap_df = pd.concat([
-                remap_df,
+        for enum_idx, i in enumerate(min_combination):
+            print(enum_idx, i)
+            # label = (labels[i] if i < 4 else labels[i-4]) if i in min_combination else ""
+            real_idx = i if i < 4 else i - 4
+            remap_df_inv = pd.concat([
+                remap_df_inv,
                 pd.DataFrame(
-                    [[distances[i, 0], distances[i, 1], distances[i, 2], distances[i, 3], labels[minimal[i]]]],
-                    columns=["Distance_A", "Distance_B", "Distance_C", "Distance_D", "label"],
-                    index=[i]
+                    [[
+                        distances.T[0, i], distances.T[1, i], distances.T[2, i], distances.T[3, i],
+                        labels[enum_idx],
+                        i >= 4
+                    ]],
+                    columns=["Distance_A", "Distance_B", "Distance_C", "Distance_D", "label", "inv"],
+                    index=[real_idx]
                 )
             ])
 
-        return remap_df
+        return remap_df_inv
