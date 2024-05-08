@@ -546,14 +546,14 @@ class MicrostateHelperWrapper:
                 min_distance = dist
                 min_combination = variant
                 min_nums = [distances.T[i, variant[i]] for i in range(4)]
-        print("##########")
-        print(min_combination)
-        print(min_nums)
-        print(min_distance)
-        print(distances)
+        # print("##########")
+        # print(min_combination)
+        # print(min_nums)
+        # print(min_distance)
+        # print(distances)
 
         for enum_idx, i in enumerate(min_combination):
-            print(enum_idx, i)
+            # print(enum_idx, i)
             # label = (labels[i] if i < 4 else labels[i-4]) if i in min_combination else ""
             real_idx = i if i < 4 else i - 4
             remap_df_inv = pd.concat([
@@ -568,5 +568,7 @@ class MicrostateHelperWrapper:
                     index=[real_idx]
                 )
             ])
+        self.normative_labels = remap_df_inv
 
-        return remap_df_inv
+        return self
+
