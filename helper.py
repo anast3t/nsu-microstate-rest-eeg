@@ -50,10 +50,26 @@ class MicrostateHelperWrapper:
         self.folders = folders
         self.sampling_rate = raw.info['sfreq']
         self.ms = None
+        self.ms_ordered = None
         self.splitted_ms = None
         self.split_dynamic_statistics = None
         self.split_static_statistics = None
         self.normative_labels = None
+
+    @staticmethod
+    def static_load(
+            folders: Folders,
+            raw_filename: str
+    ) -> Self:
+        print("Loading MHW object", raw_filename)
+        with open(
+                folders.save_data +
+                folders.mhw_objects +
+                folders.end_folder +
+                raw_filename + '.pkl',
+                'rb'
+        ) as file:
+            return pickle.load(file)
 
     def load(self) -> Self:
         print("Loading MHW object", self.raw_filename)
@@ -476,17 +492,16 @@ class MicrostateHelperWrapper:
     def calc_normative_labels(
             self,
             normative_maps,
+            recalc=False
     ) -> Self:
         """
         Calculates the normative labels for the microstates sequence.
+        :param recalc:
         :param normative_maps: normative maps to use
         :return: self
-
-        TODO: need add inverted variation - 8!
         """
-        print("Calculating normative labels...")
         try:
-            if self.normative_labels is None:
+            if self.normative_labels is None or recalc:
                 print("Normative labels not set, calculating...")
             else:
                 print("Normative labels already set")
@@ -495,7 +510,6 @@ class MicrostateHelperWrapper:
             self.normative_labels = None
 
         def calc_regroup_variants(available: [int], max_len=4, current_len=0):
-            # print(current_len, max_len)
             if len(available) == 1:
                 return available
             variants = []
@@ -509,7 +523,6 @@ class MicrostateHelperWrapper:
                     available_copy.remove(num + max_len)
                 elif num >= max_len and num - max_len in available_copy:
                     available_copy.remove(num - max_len)
-                # print(available_copy)
                 for variant in calc_regroup_variants(available_copy, max_len=max_len, current_len=current_len):
                     if isinstance(variant, int):
                         variants.append([num, variant])
@@ -524,33 +537,44 @@ class MicrostateHelperWrapper:
             2: "C",
             3: "D"
         }
-        # unique_regroup_variants = {}
         inverted_clusters_user = self.ms["Microstates"] * -1
         clusters_user_and_inv = np.append(self.ms["Microstates"], inverted_clusters_user, axis=0)
-        # print(clusters_user_and_inv.shape)
-        distances = scipy.spatial.distance.cdist(clusters_user_and_inv, normative_maps.T)
-        # distances
+        df_clusters_user_and_inv = pd.DataFrame.from_records(clusters_user_and_inv, columns=self.raw.ch_names)
+
+        # print("Self ch_names", self.raw.ch_names)
+        # print("Normative ch_names", normative_maps.T.columns)
+        # common_cols = [col for col in set(normative_maps.T.columns).intersection(self.raw.ch_names)]
+        # print("Common cols", common_cols)
+        # common_idx = [self.raw.ch_names.index(col) for col in common_cols]
+        # common_idx.sort()
+        # print("Common idx", common_idx)
+        # clusters_user_and_inv_common = clusters_user_and_inv.T[common_idx].T
+        # normative_maps_common = normative_maps.T[common_cols]
+        # distances = scipy.spatial.distance.cdist(clusters_user_and_inv_common, normative_maps_common, "correlation")
+        normative_maps_common = normative_maps.T
+        print(df_clusters_user_and_inv.shape, normative_maps_common.shape)
+        print(df_clusters_user_and_inv.columns, normative_maps_common.columns)
+        normative_maps_common = normative_maps_common.drop([col for col in normative_maps_common.columns if col not in df_clusters_user_and_inv.columns and col in normative_maps_common.columns], axis=1)
+        print(df_clusters_user_and_inv.shape, normative_maps_common.shape, normative_maps.shape)
+        distances = scipy.spatial.distance.cdist(df_clusters_user_and_inv, normative_maps_common)
         min_combination = []
         min_distance = np.inf
         min_nums = []
         for variant in (calc_regroup_variants([0, 1, 2, 3, 4, 5, 6, 7], max_len=4)):
-            # print(variant)
             dist = 0
-            # print(distances)
             for i in range(4):
-                # print(distances.T[i, variant[i]])
                 dist += distances.T[i, variant[i]]
-            # print(distances.take(variant).sum())
-            # dist = distances.take(variant).sum()
             if dist < min_distance:
                 min_distance = dist
                 min_combination = variant
                 min_nums = [distances.T[i, variant[i]] for i in range(4)]
-        # print("##########")
-        # print(min_combination)
-        # print(min_nums)
-        # print(min_distance)
-        # print(distances)
+
+        print("##########")
+        print(min_combination)
+        print(min_nums)
+        print(min_distance)
+        print(distances)
+        print("##########")
 
         for enum_idx, i in enumerate(min_combination):
             # print(enum_idx, i)
@@ -572,3 +596,43 @@ class MicrostateHelperWrapper:
 
         return self
 
+    def apply_normative_labels(self, recalc=False) -> Self:
+
+        try:
+            if self.ms_ordered is not None and not recalc:
+                print("Already applied microstates ordering")
+                return self
+        except AttributeError:
+            print("No normative labels set")
+            self.ms_ordered = None
+        print("Applying normative labels")
+
+        def create_remapper(normative_labels):
+            label_idx_remapper = {
+                "A": 0,
+                "B": 1,
+                "C": 2,
+                "D": 3
+            }
+            idx_idx_remapper = {}
+            for i in range(4):
+                idx_idx_remapper[i] = label_idx_remapper[normative_labels.T[i]["label"]]
+            print("Remapper", idx_idx_remapper)
+            return idx_idx_remapper
+
+        def reorder_microstates(ms, remapper, normative_labels):
+            ms_clone = copy.deepcopy(ms)
+            for i in range(len(ms["Sequence"])):
+                ms_clone["Sequence"][i] = remapper[ms["Sequence"][i]]
+            # print(ms["Sequence"][:1000], "\n\n\n", ms_clone["Sequence"][:1000])
+            ms_array_clone = copy.deepcopy(ms_clone["Microstates"])
+            for i in range(4):
+                invert = (-1 if normative_labels.T[i].inv else 1)
+                # invert = 1
+                print(i, "->", remapper[i], "Inverted", invert)
+                ms_clone["Microstates"][remapper[i]] = (ms_array_clone[i] * invert)
+
+            return ms_clone
+
+        self.ms_ordered = reorder_microstates(self.ms, create_remapper(self.normative_labels), self.normative_labels)
+        return self
